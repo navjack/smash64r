@@ -1,6 +1,7 @@
 #ifndef __RECOMP_UI__
 #define __RECOMP_UI__
 
+#include <functional>
 #include <memory>
 #include <string>
 
@@ -16,6 +17,23 @@ namespace Rml {
 
 namespace recompui {
 	class UiEventListenerInstancer;
+
+	// Runs `task` on the main thread and blocks until it finishes.
+	//
+	// The RmlUi context is driven from RT64's Present thread, so UI event
+	// handlers run there too. That is fine on Windows and Linux, but AppKit
+	// requires NSWindow/NSPanel to be created on the main thread -- opening a
+	// native file dialog from the Present thread raises an NSException and
+	// aborts. Note the main thread cannot be reached with dispatch_get_main_queue
+	// here: librecomp's main loop is `while (!exited) sleep_milliseconds(1)`,
+	// which never drains the dispatch queue, so dispatch_sync would deadlock.
+	// It does call the update_gfx callback every iteration, which is where these
+	// tasks are serviced instead.
+	void run_on_main_thread(const std::function<void()>& task);
+
+	// Runs any tasks queued by run_on_main_thread. Must be called from the main
+	// thread only.
+	void drain_main_thread_tasks();
 
 	class MenuController {
 	public:

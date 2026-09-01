@@ -3,7 +3,8 @@
 	url = https://github.com/mikke89/RmlUi/
 [submodule "lib/rt64"]
 	path = lib/rt64
-	url = https://github.com/rt64/rt64
+	url = https://github.com/navjack/rt64.git
+	branch = macos-port-smash64r
 [submodule "lib/freetype-windows-binaries"]
 	path = lib/freetype-windows-binaries
 	url = https://github.com/ubawurinna/freetype-windows-binaries
@@ -12,10 +13,12 @@
 	url = https://github.com/sammycage/lunasvg
 [submodule "lib/N64ModernRuntime"]
 	path = lib/N64ModernRuntime
-	url = https://github.com/N64Recomp/N64ModernRuntime.git
+	url = https://github.com/navjack/N64ModernRuntime.git
+	branch = macos-port-smash64r
 [submodule "smash64rsyms"]
 	path = smash64rsyms
 	url = https://github.com/zestydevy/smash64rsyms
 [submodule "lib/ssb-decomp-re"]
 	path = lib/ssb-decomp-re
-	url = https://github.com/Rainchus/ssb-decomp-re.git
+	url = https://github.com/navjack/ssb-decomp-re.git
+	branch = macos-port

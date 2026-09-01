@@ -188,6 +188,9 @@ target_include_directories(Smash64r PRIVATE
     ${CMAKE_SOURCE_DIR}/lib/RmlUi/Include
     ${CMAKE_SOURCE_DIR}/lib/RmlUi/Backends
     ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib
+    # rt64 was bumped across the plume RHI split; the render interface
+    # headers now live here rather than in src/rhi.
+    ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/plume
     ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/hlslpp/include
     ${CMAKE_SOURCE_DIR}/lib/rt64/src/contrib/dxc/inc
     ${CMAKE_SOURCE_DIR}/lib/rt64/src
@@ -293,6 +296,54 @@ if (CMAKE_SYSTEM_NAME MATCHES "Linux")
     find_package(Threads REQUIRED)
 
     target_link_libraries(Smash64r PRIVATE "-latomic -static-libstdc++" ${CMAKE_DL_LIBS} Threads::Threads)
+endif()
+
+if (APPLE)
+    # This project has never been built for macOS upstream (there is no macOS CI
+    # job), so this block mirrors the Linux one above minus X11: RT64 uses Metal
+    # here, and main.cpp returns a cocoa window + CAMetalLayer instead of an X11
+    # display/window pair.
+    find_package(SDL2 REQUIRED)
+    find_package(Freetype REQUIRED)
+
+    set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+    set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+    find_package(Threads REQUIRED)
+
+    target_include_directories(Smash64r BEFORE PRIVATE ${SDL2_INCLUDE_DIRS} ${FREETYPE_INCLUDE_DIRS})
+
+    # The link list below names `SDL2` unconditionally as a bare library, but
+    # Homebrew's SDL2 (sdl2-compat) is a config-mode package: it exports the
+    # imported target SDL2::SDL2 and never sets SDL2_LIBRARIES, so -lSDL2 has no
+    # search path and the link fails with "library 'SDL2' not found". Recover the
+    # directory from the imported target.
+    if (TARGET SDL2::SDL2)
+        get_target_property(_sdl2_loc SDL2::SDL2 IMPORTED_LOCATION_RELEASE)
+        if (NOT _sdl2_loc)
+            get_target_property(_sdl2_loc SDL2::SDL2 IMPORTED_LOCATION)
+        endif()
+        if (_sdl2_loc)
+            get_filename_component(_sdl2_libdir "${_sdl2_loc}" DIRECTORY)
+            target_link_directories(Smash64r PRIVATE "${_sdl2_libdir}")
+            message(STATUS "SDL2 link directory = ${_sdl2_libdir}")
+        endif()
+    endif()
+
+    target_link_libraries(Smash64r PRIVATE
+        ${FREETYPE_LIBRARIES}
+        ${CMAKE_DL_LIBS}
+        Threads::Threads
+        "-framework Cocoa"
+        "-framework Metal"
+        "-framework QuartzCore"
+        "-framework IOKit"
+    )
+
+    # rt64 forces HLSLPP_SCALAR on Apple Silicon, and hlslpp's scalar fallback
+    # calls labs() without including <stdlib.h>. GCC and MSVC pull it in
+    # transitively; AppleClang does not. The SHELL: prefix stops CMake from
+    # de-duplicating repeated -include tokens.
+    add_compile_options("SHELL:-include stdlib.h")
 endif()
 
 target_link_libraries(Smash64r PRIVATE

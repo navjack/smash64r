@@ -62,3 +62,8 @@ RSPRecomp
 
 # Controller mappings file
 gamecontrollerdb.txt
+
+# --- macOS port: build artifacts, ROMs and local machine state ---
+*.app/
+build-macos/
+build-n64recomp/

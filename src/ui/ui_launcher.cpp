@@ -15,7 +15,18 @@ extern std::vector<recomp::GameEntry> supported_games;
 
 void select_rom() {
 	nfdnchar_t* native_path = nullptr;
-	nfdresult_t result = NFD_OpenDialogN(&native_path, nullptr, 0, nullptr);
+	nfdresult_t result;
+#ifdef __APPLE__
+	// This runs on RT64's Present thread. NFD's macOS backend builds an
+	// NSOpenPanel, and AppKit raises (and aborts) if an NSWindow/NSPanel is
+	// created off the main thread, so hop over for just the dialog. Validation
+	// and the data-model update below stay on this thread, as on every platform.
+	recompui::run_on_main_thread([&native_path, &result] {
+		result = NFD_OpenDialogN(&native_path, nullptr, 0, nullptr);
+	});
+#else
+	result = NFD_OpenDialogN(&native_path, nullptr, 0, nullptr);
+#endif
 
 	if (result == NFD_OKAY) {
 		std::filesystem::path path{native_path};

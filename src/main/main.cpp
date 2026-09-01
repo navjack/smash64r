@@ -1,3 +1,12 @@
+#ifdef __APPLE__
+#include <mach-o/dyld.h>
+#endif
+#include <system_error>
+#include <string>
+#include <cstdint>
+#include <functional>
+#include <condition_variable>
+#include <mutex>
 #include <cstdio>
 #include <cassert>
 #include <unordered_map>
@@ -116,7 +125,13 @@ bool SetImageAsIcon(const char* filename, SDL_Window* window)
 SDL_Window* window;
 
 ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::gfx_data_t) {
-    window = SDL_CreateWindow("Super Smash Bros: Recompiled", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1600, 960, SDL_WINDOW_RESIZABLE);
+    Uint32 window_flags = SDL_WINDOW_RESIZABLE;
+#if defined(__APPLE__)
+    // RT64 uses Metal on Apple, so the window must be Metal-capable for
+    // SDL_Metal_CreateView below to hand back a CAMetalLayer.
+    window_flags |= SDL_WINDOW_METAL | SDL_WINDOW_ALLOW_HIGHDPI;
+#endif
+    window = SDL_CreateWindow("Super Smash Bros: Recompiled", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1600, 960, window_flags);
 #if defined(__linux__)
     SetImageAsIcon("icons/512.png", window);
     if (ultramodern::renderer::get_graphics_config().wm_option == ultramodern::renderer::WindowMode::Fullscreen) { // TODO: Remove once RT64 gets native fullscreen support on Linux
@@ -145,12 +160,62 @@ ultramodern::renderer::WindowHandle create_window(ultramodern::gfx_callbacks_t::
     }
 
     return ultramodern::renderer::WindowHandle{ wmInfo.info.x11.display, wmInfo.info.x11.window };
+#elif defined(__APPLE__)
+    SDL_MetalView view = SDL_Metal_CreateView(window);
+    return ultramodern::renderer::WindowHandle{ wmInfo.info.cocoa.window, SDL_Metal_GetLayer(view) };
 #else
     static_assert(false && "Unimplemented");
 #endif
 }
 
+namespace {
+    std::mutex main_thread_task_mutex;
+    std::vector<std::function<void()>> main_thread_tasks;
+    std::condition_variable main_thread_task_done;
+    std::uint64_t main_thread_tasks_completed = 0;
+}
+
+void recompui::run_on_main_thread(const std::function<void()>& task) {
+    std::uint64_t target;
+    {
+        std::lock_guard lock{main_thread_task_mutex};
+        main_thread_tasks.push_back(task);
+        target = main_thread_tasks_completed + main_thread_tasks.size();
+    }
+
+    std::unique_lock lock{main_thread_task_mutex};
+    main_thread_task_done.wait(lock, [target] { return main_thread_tasks_completed >= target; });
+}
+
+void recompui::drain_main_thread_tasks() {
+    std::vector<std::function<void()>> pending;
+    {
+        std::lock_guard lock{main_thread_task_mutex};
+        pending.swap(main_thread_tasks);
+    }
+
+    if (pending.empty()) {
+        return;
+    }
+
+    // Run outside the lock: a task may open a modal dialog and block for a long
+    // time, and callers waiting on the condition variable need the mutex.
+    for (const auto& task : pending) {
+        task();
+    }
+
+    {
+        std::lock_guard lock{main_thread_task_mutex};
+        main_thread_tasks_completed += pending.size();
+    }
+    main_thread_task_done.notify_all();
+}
+
 void update_gfx(void*) {
+    // librecomp calls this from the main thread every loop iteration, which is
+    // the only main-thread execution point this app has -- see the note on
+    // recompui::run_on_main_thread.
+    recompui::drain_main_thread_tasks();
     recomp::handle_events();
 }
 
@@ -495,7 +560,47 @@ void release_preload(PreloadContext& context) {
 
 #endif
 
+#ifdef __APPLE__
+// assets/, gamecontrollerdb.txt and the .rml documents are all opened by
+// relative path, so they resolve against the working directory. That is the
+// repo root when running from a build tree, but "/" when launched from
+// /Applications, where every load silently fails (RmlUi then hands back null
+// documents). Point the working directory at Contents/Resources so the same
+// relative paths keep working inside a bundle.
+static void macos_prepare_bundle_environment() {
+    uint32_t bufsize = 0;
+    _NSGetExecutablePath(nullptr, &bufsize);
+    if (bufsize == 0) {
+        return;
+    }
+
+    std::string buf(bufsize, '\0');
+    if (_NSGetExecutablePath(buf.data(), &bufsize) != 0) {
+        return;
+    }
+
+    std::error_code ec;
+    std::filesystem::path self = std::filesystem::canonical(buf.c_str(), ec);
+    if (ec) {
+        self = std::filesystem::path(buf.c_str());
+    }
+
+    const std::filesystem::path macos_dir = self.parent_path();
+    if (macos_dir.filename() != "MacOS") {
+        return; // Running from a build tree; leave the working directory alone.
+    }
+
+    const std::filesystem::path resources = macos_dir.parent_path() / "Resources";
+    if (std::filesystem::exists(resources, ec)) {
+        std::filesystem::current_path(resources, ec);
+    }
+}
+#endif
+
 int main(int argc, char** argv) {
+#ifdef __APPLE__
+    macos_prepare_bundle_environment();
+#endif
     // Map this executable into memory and lock it, which should keep it in physical memory. This ensures
     // that there are no stutters from the OS having to load new pages of the executable whenever a new code page is run.
     PreloadContext preload_context;

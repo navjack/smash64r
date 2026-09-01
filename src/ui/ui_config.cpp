@@ -725,7 +725,12 @@ public:
 			throw std::runtime_error("Failed to make RmlUi data model for the controls config menu");
 		}
 
-		constructor.BindFunc("input_count", [](Rml::Variant& out) { out = recomp::get_num_inputs(); } );
+		// get_num_inputs() returns size_t. On Linux that is unsigned long and
+		// uint64_t is also unsigned long, so Rml::Variant::Set(uint64_t) matches
+		// exactly; on macOS uint64_t is unsigned long long, so size_t matches
+		// neither the uint32_t nor the uint64_t overload and the call is
+		// ambiguous. Cast explicitly so both platforms pick the same overload.
+		constructor.BindFunc("input_count", [](Rml::Variant& out) { out = static_cast<uint64_t>(recomp::get_num_inputs()); } );
 		constructor.BindFunc("input_device_is_keyboard", [](Rml::Variant& out) { out = cur_device == recomp::InputDevice::Keyboard; } );
 
 		constructor.RegisterTransformFunc("get_input_name", [](const Rml::VariantList& inputs) {

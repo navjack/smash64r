@@ -10,7 +10,7 @@
 
 #if defined(_WIN32)
 #include <Shlobj.h>
-#elif defined(__linux__)
+#elif defined(__linux__) || defined(__APPLE__)
 #include <unistd.h>
 #include <pwd.h>
 #endif
@@ -160,6 +160,23 @@ std::filesystem::path zelda64::get_app_folder_path() {
 
    if (homedir != nullptr) {
        recomp_dir = std::filesystem::path{homedir} / (std::u8string{u8".config/"} + std::u8string{zelda64::program_id});
+   }
+#elif defined(__APPLE__)
+   // Without this branch the path stays empty, so every config write becomes a
+   // relative path. That works from a writable build directory but aborts when
+   // the app is launched from /Applications (cwd is "/"), which is exactly how
+   // this failed in the other ports in this batch.
+   const char* homedir = getenv("HOME");
+   if (homedir == nullptr) {
+       const passwd* pw = getpwuid(getuid());
+       if (pw != nullptr) {
+           homedir = pw->pw_dir;
+       }
+   }
+
+   if (homedir != nullptr) {
+       recomp_dir = std::filesystem::path{homedir} / "Library" / "Application Support" /
+                    std::filesystem::path{std::u8string{zelda64::program_id}};
    }
 #endif
 
